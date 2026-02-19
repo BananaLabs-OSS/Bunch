@@ -1,12 +1,12 @@
 # Bunch
 
-Friends + Presence service for the BananaKit ecosystem.
+Friends, blocks, and presence service for the BananaKit ecosystem.
 
 Part of [BananaLabs](https://github.com/BananaLabs-OSS).
 
 ## What It Does
 
-Bunch owns friend relationships and (eventually) online presence. Any service in the ecosystem can query Bunch to resolve social connections.
+Bunch owns friend relationships, block lists, and online presence. Players connect via WebSocket to go online, and their friends get real-time notifications. Internal services can query who's online via HTTP.
 
 Depends on [BananAuth](https://github.com/bananalabs-oss/bananauth) for identity. Uses shared JWT validation from [Potassium](https://github.com/bananalabs-oss/potassium).
 
@@ -31,11 +31,32 @@ Depends on [BananAuth](https://github.com/bananalabs-oss/bananauth) for identity
 | `DELETE` | `/blocks/:accountId` | —                          | Unblock user                         |
 | `GET`    | `/blocks`            | —                          | List blocked users                   |
 
+### Presence (WebSocket)
+
+| Path            | Auth              | Description                                        |
+| --------------- | ----------------- | -------------------------------------------------- |
+| `/ws?token=JWT` | JWT (query param) | Connect to go online, receive friend notifications |
+
+WebSocket messages pushed to connected clients:
+
+```json
+{"type":"friend_online","account_id":"uuid"}
+{"type":"friend_offline","account_id":"uuid"}
+```
+
+### Internal (service token)
+
+| Method | Path                         | Body                              | Description             |
+| ------ | ---------------------------- | --------------------------------- | ----------------------- |
+| `GET`  | `/internal/presence/:userId` | —                                 | Check if user is online |
+| `POST` | `/internal/presence/bulk`    | `{ "account_ids": ["uuid",...] }` | Bulk online check       |
+| `GET`  | `/internal/presence/count`   | —                                 | Total online players    |
+
 ### System
 
-| Method | Path      | Description  |
-| ------ | --------- | ------------ |
-| `GET`  | `/health` | Health check |
+| Method | Path      | Description                          |
+| ------ | --------- | ------------------------------------ |
+| `GET`  | `/health` | Health check (includes online_count) |
 
 ## Config
 
@@ -56,6 +77,6 @@ JWT_SECRET=your-secret go run ./cmd/server
 ## Docker
 
 ```bash
-docker build -t bunch .
+docker pull ghcr.io/bananalabs-oss/bunch:v0.2.0
 docker run -p 8002:8002 -e JWT_SECRET=your-secret bunch
 ```
