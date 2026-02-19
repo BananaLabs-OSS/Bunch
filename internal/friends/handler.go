@@ -293,3 +293,28 @@ func (h *Handler) RemoveFriendship(ctx context.Context, accountA, accountB uuid.
 		Exec(ctx)
 	return err
 }
+
+// ListFriendIDs returns just the account IDs of accepted friends.
+// Used by the presence hub to know who to notify.
+func (h *Handler) ListFriendIDs(ctx context.Context, accountID uuid.UUID) ([]uuid.UUID, error) {
+	var friendships []models.Friendship
+	err := h.db.NewSelect().
+		Model(&friendships).
+		Where("(requester_id = ? OR addressee_id = ?) AND status = ?",
+			accountID, accountID, models.StatusAccepted).
+		Scan(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	ids := make([]uuid.UUID, 0, len(friendships))
+	for _, f := range friendships {
+		if f.AddresseeID == accountID {
+			ids = append(ids, f.RequesterID)
+		} else {
+			ids = append(ids, f.AddresseeID)
+		}
+	}
+
+	return ids, nil
+}
