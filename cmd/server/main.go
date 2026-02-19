@@ -13,6 +13,7 @@ import (
 	"github.com/bananalabs-oss/bunch/internal/blocks"
 	"github.com/bananalabs-oss/bunch/internal/database"
 	"github.com/bananalabs-oss/bunch/internal/friends"
+	"github.com/bananalabs-oss/bunch/internal/presence"
 	potassium "github.com/bananalabs-oss/potassium/middleware"
 	"github.com/gin-gonic/gin"
 )
@@ -47,15 +48,23 @@ func main() {
 	friendsHandler := friends.NewHandler(db)
 	blocksHandler := blocks.NewHandler(db, friendsHandler)
 
+	// Presence
+	presenceHub := presence.NewHub(friendsHandler)
+	presenceHandler := presence.NewHandler(presenceHub, []byte(jwtSecret))
+
 	// Router
 	router := gin.Default()
 
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
-			"service": "bunch",
-			"status":  "healthy",
+			"service":      "bunch",
+			"status":       "healthy",
+			"online_count": presenceHub.OnlineCount(),
 		})
 	})
+
+	// WebSocket — JWT via query param, no middleware
+	router.GET("/ws", presenceHandler.WebSocket)
 
 	// Player-facing routes (JWT auth via Potassium)
 	authed := router.Group("/")
@@ -82,11 +91,15 @@ func main() {
 	}
 
 	// Internal service routes (service token auth)
-	// Presence endpoints will go here in phase 2.
-	_ = router.Group("/internal")
-	_ = potassium.ServiceAuth(serviceSecret) // will be used when internal routes are added
+	internal := router.Group("/internal")
+	internal.Use(potassium.ServiceAuth(serviceSecret))
+	{
+		internal.GET("/presence/:userId", presenceHandler.GetPresence)
+		internal.POST("/presence/bulk", presenceHandler.BulkPresence)
+		internal.GET("/presence/count", presenceHandler.OnlineCount)
+	}
 
-	// Start server with graceful shutdown (same pattern as BananAuth)
+	// Start server with graceful shutdown
 	addr := fmt.Sprintf("%s:%s", host, port)
 	srv := &http.Server{
 		Addr:    addr,
