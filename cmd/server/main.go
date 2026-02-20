@@ -14,18 +14,19 @@ import (
 	"github.com/bananalabs-oss/bunch/internal/database"
 	"github.com/bananalabs-oss/bunch/internal/friends"
 	"github.com/bananalabs-oss/bunch/internal/presence"
-	potassium "github.com/bananalabs-oss/potassium/middleware"
+	"github.com/bananalabs-oss/potassium/config"
+	"github.com/bananalabs-oss/potassium/middleware"
 	"github.com/gin-gonic/gin"
 )
 
 func main() {
 	log.Printf("Starting Bunch")
 
-	jwtSecret := requireEnv("JWT_SECRET")
-	serviceSecret := envOrDefault("SERVICE_SECRET", "dev-service-secret")
-	databaseURL := envOrDefault("DATABASE_URL", "sqlite://bunch.db")
-	host := envOrDefault("HOST", "0.0.0.0")
-	port := envOrDefault("PORT", "8002")
+	jwtSecret := config.RequireEnv("JWT_SECRET")
+	serviceSecret := config.EnvOrDefault("SERVICE_SECRET", "dev-service-secret")
+	databaseURL := config.EnvOrDefault("DATABASE_URL", "sqlite://bunch.db")
+	host := config.EnvOrDefault("HOST", "0.0.0.0")
+	port := config.EnvOrDefault("PORT", "8002")
 
 	log.Printf("Bunch Configuration:")
 	log.Printf("  Host:     %s", host)
@@ -68,7 +69,7 @@ func main() {
 
 	// Player-facing routes (JWT auth via Potassium)
 	authed := router.Group("/")
-	authed.Use(potassium.JWTAuth(potassium.JWTConfig{
+	authed.Use(middleware.JWTAuth(middleware.JWTConfig{
 		Secret: []byte(jwtSecret),
 	}))
 	{
@@ -92,7 +93,7 @@ func main() {
 
 	// Internal service routes (service token auth)
 	internal := router.Group("/internal")
-	internal.Use(potassium.ServiceAuth(serviceSecret))
+	internal.Use(middleware.ServiceAuth(serviceSecret))
 	{
 		internal.GET("/presence/:userId", presenceHandler.GetPresence)
 		internal.POST("/presence/bulk", presenceHandler.BulkPresence)
@@ -126,19 +127,4 @@ func main() {
 	}
 
 	log.Printf("Bunch stopped")
-}
-
-func requireEnv(key string) string {
-	val := os.Getenv(key)
-	if val == "" {
-		log.Fatalf("%s is required", key)
-	}
-	return val
-}
-
-func envOrDefault(key, fallback string) string {
-	if val, ok := os.LookupEnv(key); ok {
-		return val
-	}
-	return fallback
 }

@@ -3,8 +3,7 @@ package presence
 import (
 	"net/http"
 
-	"github.com/bananalabs-oss/bunch/internal/models"
-	potassium "github.com/bananalabs-oss/potassium/middleware"
+	"github.com/bananalabs-oss/potassium/middleware"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -30,16 +29,16 @@ func NewHandler(hub *Hub, jwtSecret []byte) *Handler {
 func (h *Handler) WebSocket(c *gin.Context) {
 	tokenStr := c.Query("token")
 	if tokenStr == "" {
-		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
+		c.JSON(http.StatusUnauthorized, middleware.ErrorResponse{
 			Error:   "missing_token",
 			Message: "token query parameter is required",
 		})
 		return
 	}
 
-	claims, err := potassium.ParseToken(tokenStr, h.jwtSecret)
+	claims, err := middleware.ParseToken(tokenStr, h.jwtSecret)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, models.ErrorResponse{
+		c.JSON(http.StatusUnauthorized, middleware.ErrorResponse{
 			Error:   "invalid_token",
 			Message: "Invalid or expired token",
 		})
@@ -77,7 +76,7 @@ func (h *Handler) WebSocket(c *gin.Context) {
 func (h *Handler) GetPresence(c *gin.Context) {
 	userID, err := uuid.Parse(c.Param("userId"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+		c.JSON(http.StatusBadRequest, middleware.ErrorResponse{
 			Error:   "invalid_id",
 			Message: "Invalid user ID",
 		})
@@ -96,7 +95,7 @@ func (h *Handler) BulkPresence(c *gin.Context) {
 		AccountIDs []uuid.UUID `json:"account_ids" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+		c.JSON(http.StatusBadRequest, middleware.ErrorResponse{
 			Error:   "invalid_request",
 			Message: "account_ids is required",
 		})
