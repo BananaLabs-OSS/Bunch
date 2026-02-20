@@ -5,17 +5,15 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
-	"os/signal"
-	"syscall"
-	"time"
 
 	"github.com/bananalabs-oss/bunch/internal/blocks"
-	"github.com/bananalabs-oss/bunch/internal/database"
 	"github.com/bananalabs-oss/bunch/internal/friends"
+	"github.com/bananalabs-oss/bunch/internal/models"
 	"github.com/bananalabs-oss/bunch/internal/presence"
 	"github.com/bananalabs-oss/potassium/config"
+	"github.com/bananalabs-oss/potassium/database"
 	"github.com/bananalabs-oss/potassium/middleware"
+	"github.com/bananalabs-oss/potassium/server"
 	"github.com/gin-gonic/gin"
 )
 
@@ -41,7 +39,17 @@ func main() {
 	}
 	defer db.Close()
 
-	if err := database.Migrate(ctx, db); err != nil {
+	if err := database.Migrate(ctx, db, []interface{}{
+		(*models.Friendship)(nil),
+		(*models.Block)(nil),
+	}, []database.Index{
+		{Name: "idx_friendships_requester", Query: "CREATE INDEX IF NOT EXISTS idx_friendships_requester ON friendships (requester_id)"},
+		{Name: "idx_friendships_addressee", Query: "CREATE INDEX IF NOT EXISTS idx_friendships_addressee ON friendships (addressee_id)"},
+		{Name: "idx_friendships_status", Query: "CREATE INDEX IF NOT EXISTS idx_friendships_status ON friendships (status)"},
+		{Name: "idx_friendships_pair", Query: "CREATE UNIQUE INDEX IF NOT EXISTS idx_friendships_pair ON friendships (requester_id, addressee_id)"},
+		{Name: "idx_blocks_blocker", Query: "CREATE INDEX IF NOT EXISTS idx_blocks_blocker ON blocks (blocker_id)"},
+		{Name: "idx_blocks_pair", Query: "CREATE UNIQUE INDEX IF NOT EXISTS idx_blocks_pair ON blocks (blocker_id, blocked_id)"},
+	}); err != nil {
 		log.Fatalf("Failed to run migrations: %v", err)
 	}
 
@@ -100,31 +108,6 @@ func main() {
 		internal.GET("/presence/count", presenceHandler.OnlineCount)
 	}
 
-	// Start server with graceful shutdown
 	addr := fmt.Sprintf("%s:%s", host, port)
-	srv := &http.Server{
-		Addr:    addr,
-		Handler: router,
-	}
-
-	go func() {
-		log.Printf("Bunch listening on %s", addr)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Server error: %v", err)
-		}
-	}()
-
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-	log.Printf("Shutting down Bunch...")
-
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		log.Fatalf("Server forced to shutdown: %v", err)
-	}
-
-	log.Printf("Bunch stopped")
+	server.ListenAndShutdown(addr, router, "Bunch")
 }
