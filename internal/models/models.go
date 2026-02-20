@@ -71,9 +71,3 @@ type HandleRequestInput struct {
 type BlockInput struct {
 	AccountID uuid.UUID `json:"account_id" binding:"required"`
 }
-
-// ErrorResponse matches BananAuth's error format.
-type ErrorResponse struct {
-	Error   string `json:"error"`
-	Message string `json:"message,omitempty"`
-}

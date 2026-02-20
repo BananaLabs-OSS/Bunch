@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/bananalabs-oss/bunch/internal/models"
+	"github.com/bananalabs-oss/potassium/middleware"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
@@ -24,7 +25,7 @@ func (h *Handler) SendRequest(c *gin.Context) {
 
 	var req models.SendRequestInput
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+		c.JSON(http.StatusBadRequest, middleware.ErrorResponse{
 			Error:   "invalid_request",
 			Message: "friend_id is required",
 		})
@@ -32,7 +33,7 @@ func (h *Handler) SendRequest(c *gin.Context) {
 	}
 
 	if accountID == req.FriendID {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+		c.JSON(http.StatusBadRequest, middleware.ErrorResponse{
 			Error:   "self_friend",
 			Message: "Cannot send a friend request to yourself",
 		})
@@ -48,11 +49,11 @@ func (h *Handler) SendRequest(c *gin.Context) {
 			accountID, req.FriendID, req.FriendID, accountID).
 		Exists(ctx)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse{Error: "database_error"})
+		c.JSON(http.StatusInternalServerError, middleware.ErrorResponse{Error: "database_error"})
 		return
 	}
 	if blocked {
-		c.JSON(http.StatusForbidden, models.ErrorResponse{
+		c.JSON(http.StatusForbidden, middleware.ErrorResponse{
 			Error:   "blocked",
 			Message: "Cannot send friend request",
 		})
@@ -68,12 +69,12 @@ func (h *Handler) SendRequest(c *gin.Context) {
 		Scan(ctx)
 	if err == nil {
 		if existing.Status == models.StatusAccepted {
-			c.JSON(http.StatusConflict, models.ErrorResponse{
+			c.JSON(http.StatusConflict, middleware.ErrorResponse{
 				Error:   "already_friends",
 				Message: "Already friends with this user",
 			})
 		} else {
-			c.JSON(http.StatusConflict, models.ErrorResponse{
+			c.JSON(http.StatusConflict, middleware.ErrorResponse{
 				Error:   "request_exists",
 				Message: "A friend request already exists",
 			})
@@ -92,7 +93,7 @@ func (h *Handler) SendRequest(c *gin.Context) {
 	}
 
 	if _, err := h.db.NewInsert().Model(&friendship).Exec(ctx); err != nil {
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+		c.JSON(http.StatusInternalServerError, middleware.ErrorResponse{
 			Error:   "creation_failed",
 			Message: "Failed to create friend request",
 		})
@@ -107,7 +108,7 @@ func (h *Handler) AcceptRequest(c *gin.Context) {
 
 	var req models.HandleRequestInput
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+		c.JSON(http.StatusBadRequest, middleware.ErrorResponse{
 			Error:   "invalid_request",
 			Message: "request_id is required",
 		})
@@ -122,7 +123,7 @@ func (h *Handler) AcceptRequest(c *gin.Context) {
 		Where("id = ? AND addressee_id = ? AND status = ?", req.RequestID, accountID, models.StatusPending).
 		Scan(ctx)
 	if err != nil {
-		c.JSON(http.StatusNotFound, models.ErrorResponse{
+		c.JSON(http.StatusNotFound, middleware.ErrorResponse{
 			Error:   "not_found",
 			Message: "Friend request not found or you are not the recipient",
 		})
@@ -133,7 +134,7 @@ func (h *Handler) AcceptRequest(c *gin.Context) {
 	friendship.UpdatedAt = time.Now().UTC()
 
 	if _, err := h.db.NewUpdate().Model(&friendship).WherePK().Exec(ctx); err != nil {
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse{Error: "update_failed"})
+		c.JSON(http.StatusInternalServerError, middleware.ErrorResponse{Error: "update_failed"})
 		return
 	}
 
@@ -145,7 +146,7 @@ func (h *Handler) DeclineRequest(c *gin.Context) {
 
 	var req models.HandleRequestInput
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+		c.JSON(http.StatusBadRequest, middleware.ErrorResponse{
 			Error:   "invalid_request",
 			Message: "request_id is required",
 		})
@@ -159,13 +160,13 @@ func (h *Handler) DeclineRequest(c *gin.Context) {
 		Where("id = ? AND addressee_id = ? AND status = ?", req.RequestID, accountID, models.StatusPending).
 		Exec(ctx)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse{Error: "database_error"})
+		c.JSON(http.StatusInternalServerError, middleware.ErrorResponse{Error: "database_error"})
 		return
 	}
 
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		c.JSON(http.StatusNotFound, models.ErrorResponse{
+		c.JSON(http.StatusNotFound, middleware.ErrorResponse{
 			Error:   "not_found",
 			Message: "Friend request not found or you are not the recipient",
 		})
@@ -187,13 +188,13 @@ func (h *Handler) RemoveFriend(c *gin.Context) {
 			accountID, friendID, friendID, accountID, models.StatusAccepted).
 		Exec(ctx)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse{Error: "database_error"})
+		c.JSON(http.StatusInternalServerError, middleware.ErrorResponse{Error: "database_error"})
 		return
 	}
 
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		c.JSON(http.StatusNotFound, models.ErrorResponse{
+		c.JSON(http.StatusNotFound, middleware.ErrorResponse{
 			Error:   "not_friends",
 			Message: "Not friends with this user",
 		})
@@ -214,7 +215,7 @@ func (h *Handler) ListFriends(c *gin.Context) {
 			accountID, accountID, models.StatusAccepted).
 		Scan(ctx)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse{Error: "database_error"})
+		c.JSON(http.StatusInternalServerError, middleware.ErrorResponse{Error: "database_error"})
 		return
 	}
 
@@ -243,7 +244,7 @@ func (h *Handler) ListRequests(c *gin.Context) {
 		Model(&incomingRows).
 		Where("addressee_id = ? AND status = ?", accountID, models.StatusPending).
 		Scan(ctx); err != nil {
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse{Error: "database_error"})
+		c.JSON(http.StatusInternalServerError, middleware.ErrorResponse{Error: "database_error"})
 		return
 	}
 
@@ -263,7 +264,7 @@ func (h *Handler) ListRequests(c *gin.Context) {
 		Model(&outgoingRows).
 		Where("requester_id = ? AND status = ?", accountID, models.StatusPending).
 		Scan(ctx); err != nil {
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse{Error: "database_error"})
+		c.JSON(http.StatusInternalServerError, middleware.ErrorResponse{Error: "database_error"})
 		return
 	}
 

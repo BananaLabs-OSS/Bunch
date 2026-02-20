@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/bananalabs-oss/bunch/internal/models"
+	"github.com/bananalabs-oss/potassium/middleware"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
@@ -30,7 +31,7 @@ func (h *Handler) BlockUser(c *gin.Context) {
 
 	var req models.BlockInput
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+		c.JSON(http.StatusBadRequest, middleware.ErrorResponse{
 			Error:   "invalid_request",
 			Message: "account_id is required",
 		})
@@ -38,7 +39,7 @@ func (h *Handler) BlockUser(c *gin.Context) {
 	}
 
 	if blockerID == req.AccountID {
-		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+		c.JSON(http.StatusBadRequest, middleware.ErrorResponse{
 			Error:   "self_block",
 			Message: "Cannot block yourself",
 		})
@@ -53,11 +54,11 @@ func (h *Handler) BlockUser(c *gin.Context) {
 		Where("blocker_id = ? AND blocked_id = ?", blockerID, req.AccountID).
 		Exists(ctx)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse{Error: "database_error"})
+		c.JSON(http.StatusInternalServerError, middleware.ErrorResponse{Error: "database_error"})
 		return
 	}
 	if exists {
-		c.JSON(http.StatusConflict, models.ErrorResponse{
+		c.JSON(http.StatusConflict, middleware.ErrorResponse{
 			Error:   "already_blocked",
 			Message: "User already blocked",
 		})
@@ -72,7 +73,7 @@ func (h *Handler) BlockUser(c *gin.Context) {
 	}
 
 	if _, err := h.db.NewInsert().Model(&block).Exec(ctx); err != nil {
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse{Error: "creation_failed"})
+		c.JSON(http.StatusInternalServerError, middleware.ErrorResponse{Error: "creation_failed"})
 		return
 	}
 
@@ -93,13 +94,13 @@ func (h *Handler) UnblockUser(c *gin.Context) {
 		Where("blocker_id = ? AND blocked_id = ?", blockerID, blockedID).
 		Exec(ctx)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse{Error: "database_error"})
+		c.JSON(http.StatusInternalServerError, middleware.ErrorResponse{Error: "database_error"})
 		return
 	}
 
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		c.JSON(http.StatusNotFound, models.ErrorResponse{
+		c.JSON(http.StatusNotFound, middleware.ErrorResponse{
 			Error:   "not_found",
 			Message: "Block not found",
 		})
@@ -119,7 +120,7 @@ func (h *Handler) ListBlocked(c *gin.Context) {
 		Where("blocker_id = ?", blockerID).
 		Scan(ctx)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, models.ErrorResponse{Error: "database_error"})
+		c.JSON(http.StatusInternalServerError, middleware.ErrorResponse{Error: "database_error"})
 		return
 	}
 
