@@ -85,7 +85,14 @@ func (h *Handler) BlockUser(c *gin.Context) {
 
 func (h *Handler) UnblockUser(c *gin.Context) {
 	blockerID := uuid.MustParse(c.GetString("account_id"))
-	blockedID := uuid.MustParse(c.Param("accountId"))
+	blockedID, err := uuid.Parse(c.Param("accountId"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, middleware.ErrorResponse{
+			Error:   "invalid_id",
+			Message: "Invalid account ID",
+		})
+		return
+	}
 
 	ctx := c.Request.Context()
 

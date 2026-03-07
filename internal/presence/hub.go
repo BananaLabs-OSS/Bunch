@@ -22,7 +22,7 @@ type Message struct {
 }
 
 type Hub struct {
-	mu          sync.RWMutex
+	mu          sync.Mutex
 	connections map[uuid.UUID]*websocket.Conn
 	friends     FriendLister
 }
@@ -58,16 +58,16 @@ func (h *Hub) Unregister(accountID uuid.UUID) {
 
 // IsOnline checks if a single user is connected.
 func (h *Hub) IsOnline(accountID uuid.UUID) bool {
-	h.mu.RLock()
+	h.mu.Lock()
 	_, online := h.connections[accountID]
-	h.mu.RUnlock()
+	h.mu.Unlock()
 	return online
 }
 
 // BulkOnline checks which users from a list are currently connected.
 func (h *Hub) BulkOnline(accountIDs []uuid.UUID) map[uuid.UUID]bool {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
+	h.mu.Lock()
+	defer h.mu.Unlock()
 
 	result := make(map[uuid.UUID]bool, len(accountIDs))
 	for _, id := range accountIDs {
@@ -79,8 +79,8 @@ func (h *Hub) BulkOnline(accountIDs []uuid.UUID) map[uuid.UUID]bool {
 
 // OnlineCount returns the total number of connected players.
 func (h *Hub) OnlineCount() int {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	return len(h.connections)
 }
 
@@ -102,8 +102,8 @@ func (h *Hub) notifyFriends(accountID uuid.UUID, msgType string) {
 		return
 	}
 
-	h.mu.RLock()
-	defer h.mu.RUnlock()
+	h.mu.Lock()
+	defer h.mu.Unlock()
 
 	for _, friendID := range friendIDs {
 		if conn, online := h.connections[friendID]; online {

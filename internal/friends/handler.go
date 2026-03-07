@@ -178,7 +178,14 @@ func (h *Handler) DeclineRequest(c *gin.Context) {
 
 func (h *Handler) RemoveFriend(c *gin.Context) {
 	accountID := uuid.MustParse(c.GetString("account_id"))
-	friendID := uuid.MustParse(c.Param("friendId"))
+	friendID, err := uuid.Parse(c.Param("friendId"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, middleware.ErrorResponse{
+			Error:   "invalid_id",
+			Message: "Invalid friend ID",
+		})
+		return
+	}
 
 	ctx := c.Request.Context()
 

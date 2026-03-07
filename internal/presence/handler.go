@@ -45,7 +45,14 @@ func (h *Handler) WebSocket(c *gin.Context) {
 		return
 	}
 
-	accountID := uuid.MustParse(claims.AccountID)
+	accountID, err := uuid.Parse(claims.AccountID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, middleware.ErrorResponse{
+			Error:   "invalid_account",
+			Message: "Invalid account ID in token",
+		})
+		return
+	}
 
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
