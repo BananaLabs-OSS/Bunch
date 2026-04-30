@@ -1,0 +1,15 @@
+name = "bunch"
+version = "0.1.0"
+wasm = "bunch.wasm"
+
+capabilities = [
+    "transport.http.inbound",
+    "transport.ws.inbound",
+    "storage.sqlite",
+]
+
+[config]
+jwt_secret = "dev-jwt-secret-change-me"
+# Canonical key; matches the native SERVICE_SECRET env var. Omit to
+# fall back to "dev-service-secret" (native cmd/server default).
+service_secret = "dev-service-secret"
