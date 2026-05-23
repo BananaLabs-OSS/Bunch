@@ -2,6 +2,7 @@ package presence
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/bananalabs-oss/potassium/middleware"
 	"github.com/gin-gonic/gin"
@@ -9,19 +10,51 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool {
-		return true // Allow all origins for now; lock down in production
-	},
-}
-
 type Handler struct {
 	hub       *Hub
 	jwtSecret []byte
+	upgrader  websocket.Upgrader
 }
 
-func NewHandler(hub *Hub, jwtSecret []byte) *Handler {
-	return &Handler{hub: hub, jwtSecret: jwtSecret}
+// NewHandler builds the presence handler. allowedOrigins controls the WS
+// Origin allowlist: nil/empty denies all browser WS upgrades (fail closed);
+// a single "*" entry allows any origin (dev only); otherwise each request's
+// Origin header must exact-match (case-insensitively) one of the entries.
+func NewHandler(hub *Hub, jwtSecret []byte, allowedOrigins []string) *Handler {
+	allow := normalizeOrigins(allowedOrigins)
+	wildcard := len(allow) == 1 && allow[0] == "*"
+	return &Handler{
+		hub:       hub,
+		jwtSecret: jwtSecret,
+		upgrader: websocket.Upgrader{
+			CheckOrigin: func(r *http.Request) bool {
+				if wildcard {
+					return true
+				}
+				origin := strings.ToLower(strings.TrimSpace(r.Header.Get("Origin")))
+				if origin == "" {
+					return false
+				}
+				for _, a := range allow {
+					if a == origin {
+						return true
+					}
+				}
+				return false
+			},
+		},
+	}
+}
+
+func normalizeOrigins(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		s = strings.ToLower(strings.TrimSpace(s))
+		if s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // WebSocket handles the WS upgrade. JWT is passed as ?token= query param
@@ -54,7 +87,7 @@ func (h *Handler) WebSocket(c *gin.Context) {
 		return
 	}
 
-	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+	conn, err := h.upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		// Upgrade already wrote the HTTP error
 		return

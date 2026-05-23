@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/bananalabs-oss/bunch/internal/blocks"
 	"github.com/bananalabs-oss/bunch/internal/friends"
@@ -25,11 +26,22 @@ func main() {
 	databaseURL := config.EnvOrDefault("DATABASE_URL", "sqlite://bunch.db")
 	host := config.EnvOrDefault("HOST", "0.0.0.0")
 	port := config.EnvOrDefault("PORT", "8002")
+	allowedOriginsRaw := config.EnvOrDefault("WS_ALLOWED_ORIGINS", "")
+
+	allowedOrigins := parseAllowedOrigins(allowedOriginsRaw)
 
 	log.Printf("Bunch Configuration:")
 	log.Printf("  Host:     %s", host)
 	log.Printf("  Port:     %s", port)
 	log.Printf("  Database: %s", databaseURL)
+	switch {
+	case len(allowedOrigins) == 0:
+		log.Printf("  WS Origins: <none> (all browser WS upgrades will be rejected — set WS_ALLOWED_ORIGINS)")
+	case len(allowedOrigins) == 1 && allowedOrigins[0] == "*":
+		log.Printf("  WS Origins: * (wildcard — DEV ONLY, do not use in production)")
+	default:
+		log.Printf("  WS Origins: %v", allowedOrigins)
+	}
 
 	ctx := context.Background()
 
@@ -59,7 +71,7 @@ func main() {
 
 	// Presence
 	presenceHub := presence.NewHub(friendsHandler)
-	presenceHandler := presence.NewHandler(presenceHub, []byte(jwtSecret))
+	presenceHandler := presence.NewHandler(presenceHub, []byte(jwtSecret), allowedOrigins)
 
 	// Router
 	router := gin.Default()
@@ -110,4 +122,16 @@ func main() {
 
 	addr := fmt.Sprintf("%s:%s", host, port)
 	server.ListenAndShutdown(addr, router, "Bunch")
+}
+
+func parseAllowedOrigins(raw string) []string {
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
