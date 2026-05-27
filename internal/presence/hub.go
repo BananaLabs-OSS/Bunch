@@ -103,13 +103,17 @@ func (h *Hub) notifyFriends(accountID uuid.UUID, msgType string) {
 	}
 
 	h.mu.Lock()
-	defer h.mu.Unlock()
-
+	targets := make([]*websocket.Conn, 0, len(friendIDs))
 	for _, friendID := range friendIDs {
 		if conn, online := h.connections[friendID]; online {
-			if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
-				log.Printf("presence: failed to notify %s: %v", friendID, err)
-			}
+			targets = append(targets, conn)
+		}
+	}
+	h.mu.Unlock()
+
+	for _, conn := range targets {
+		if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+			log.Printf("presence: failed to notify: %v", err)
 		}
 	}
 }

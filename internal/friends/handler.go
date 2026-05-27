@@ -2,6 +2,7 @@ package friends
 
 import (
 	"context"
+	"database/sql"
 	"net/http"
 	"time"
 
@@ -81,7 +82,12 @@ func (h *Handler) SendRequest(c *gin.Context) {
 		}
 		return
 	}
+	if err != sql.ErrNoRows {
+		c.JSON(http.StatusInternalServerError, middleware.ErrorResponse{Error: "database_error"})
+		return
+	}
 
+	// No existing friendship — proceed to insert
 	now := time.Now().UTC()
 	friendship := models.Friendship{
 		ID:          uuid.New(),
