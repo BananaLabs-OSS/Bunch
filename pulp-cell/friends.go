@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"net/http"
 	"time"
 
@@ -76,6 +77,10 @@ func (h *FriendsHandler) SendRequest(c *pulpgin.Context) {
 				Message: "A friend request already exists",
 			})
 		}
+		return
+	}
+	if err != sql.ErrNoRows {
+		c.JSON(http.StatusInternalServerError, middleware.ErrorResponse{Error: "database_error"})
 		return
 	}
 
