@@ -65,10 +65,15 @@ func (h *Hub) Register(accountID uuid.UUID, connID uint64) {
 }
 
 // Unregister removes an account from the presence map when its
-// WebSocket closes.
-func (h *Hub) Unregister(accountID uuid.UUID) {
+// WebSocket closes. Only deletes the map entry when the stored connID
+// matches the one being unregistered — guards against a reconnect race
+// where a new Register overwrites the entry before the old conn's close
+// event fires.
+func (h *Hub) Unregister(accountID uuid.UUID, connID uint64) {
 	h.mu.Lock()
-	delete(h.accountToConn, accountID)
+	if stored, exists := h.accountToConn[accountID]; exists && stored == connID {
+		delete(h.accountToConn, accountID)
+	}
 	h.mu.Unlock()
 
 	h.notifyFriends(accountID, "friend_offline")
@@ -191,7 +196,7 @@ func (h *PresenceHandler) WSHandlers() pulpgin.WSHandlers {
 			if !ok {
 				return
 			}
-			h.hub.Unregister(accountID)
+			h.hub.Unregister(accountID, c.ConnID)
 		},
 	}
 }

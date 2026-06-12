@@ -3,6 +3,7 @@ package presence
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/bananalabs-oss/potassium/middleware"
 	"github.com/gin-gonic/gin"
@@ -96,18 +97,23 @@ func (h *Handler) WebSocket(c *gin.Context) {
 	h.hub.Register(accountID, conn)
 
 	// Read loop — keeps the connection alive, handles client disconnect.
-	// We don't expect meaningful messages from the client yet.
+	// Sets an initial read deadline; the pong handler in writePump resets
+	// it on each pong so dead connections are detected within pongWait.
 	go func() {
 		defer func() {
-			h.hub.Unregister(accountID)
+			h.hub.Unregister(accountID, conn)
 			_ = conn.Close()
 		}()
 
+		_ = conn.SetReadDeadline(time.Now().Add(pongWait))
 		for {
 			_, _, err := conn.ReadMessage()
 			if err != nil {
 				break
 			}
+			// Reset deadline on any inbound message (including pong frames
+			// forwarded to the pong handler).
+			_ = conn.SetReadDeadline(time.Now().Add(pongWait))
 		}
 	}()
 }
