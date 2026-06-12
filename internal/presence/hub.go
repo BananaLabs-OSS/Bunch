@@ -77,16 +77,17 @@ func (h *Hub) Register(accountID uuid.UUID, conn *websocket.Conn) {
 	h.notifyFriends(accountID, "friend_online")
 }
 
-// Unregister removes a player from the presence map and notifies their
-// online friends. Only deletes the map entry when the stored connection
-// is the same one being unregistered — guards against a reconnect race
-// where a new Register overwrites the entry before the old conn's read
-// loop calls Unregister.
+// Unregister removes the presence entry for accountID. When conn is non-nil,
+// the entry is only removed if it matches — guarding against a reconnect race
+// where a new Register overwrites the entry before the old conn's Unregister fires.
+// Pass nil from paths that lack direct conn access.
 func (h *Hub) Unregister(accountID uuid.UUID, conn *websocket.Conn) {
 	h.mu.Lock()
-	if entry, exists := h.connections[accountID]; exists && entry.conn == conn {
-		close(entry.send) // signals the writer goroutine to exit
-		delete(h.connections, accountID)
+	if entry, exists := h.connections[accountID]; exists {
+		if conn == nil || entry.conn == conn {
+			close(entry.send) // signals the writer goroutine to exit
+			delete(h.connections, accountID)
+		}
 	}
 	h.mu.Unlock()
 
