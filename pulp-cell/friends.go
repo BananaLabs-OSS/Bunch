@@ -124,11 +124,15 @@ func (h *FriendsHandler) AcceptRequest(c *pulpgin.Context) {
 		Model(&friendship).
 		Where("id = ? AND addressee_id = ? AND status = ?", req.RequestID, accountID, StatusPending).
 		Scan(ctx)
-	if err != nil {
+	if err == sql.ErrNoRows {
 		c.JSON(http.StatusNotFound, middleware.ErrorResponse{
 			Error:   "not_found",
 			Message: "Friend request not found or you are not the recipient",
 		})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, middleware.ErrorResponse{Error: "database_error"})
 		return
 	}
 
