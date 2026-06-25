@@ -32,4 +32,11 @@ go.work.sum
 # .vscode/
 
 pulp-cell/*.wasm
+pulp-cell/bunch-cell
 pulp-cell/data/
+
+# Runtime SQLite databases (local dev/deployment artifacts; never commit)
+*.db
+*.db-shm
+*.db-wal
+pulp-deployment/data/
