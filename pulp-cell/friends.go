@@ -21,7 +21,11 @@ func NewFriendsHandler(db *bun.DB) *FriendsHandler {
 }
 
 func (h *FriendsHandler) SendRequest(c *pulpgin.Context) {
-	accountID := uuid.MustParse(c.GetString("account_id"))
+	accountID, err := uuid.Parse(c.GetString("account_id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, middleware.ErrorResponse{Error: "invalid_token", Message: "Malformed account_id in token"})
+		return
+	}
 
 	var req SendRequestInput
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -106,7 +110,11 @@ func (h *FriendsHandler) SendRequest(c *pulpgin.Context) {
 }
 
 func (h *FriendsHandler) AcceptRequest(c *pulpgin.Context) {
-	accountID := uuid.MustParse(c.GetString("account_id"))
+	accountID, err := uuid.Parse(c.GetString("account_id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, middleware.ErrorResponse{Error: "invalid_token", Message: "Malformed account_id in token"})
+		return
+	}
 
 	var req HandleRequestInput
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -120,7 +128,7 @@ func (h *FriendsHandler) AcceptRequest(c *pulpgin.Context) {
 	ctx := c.Ctx()
 
 	var friendship Friendship
-	err := h.db.NewSelect().
+	err = h.db.NewSelect().
 		Model(&friendship).
 		Where("id = ? AND addressee_id = ? AND status = ?", req.RequestID, accountID, StatusPending).
 		Scan(ctx)
@@ -148,7 +156,11 @@ func (h *FriendsHandler) AcceptRequest(c *pulpgin.Context) {
 }
 
 func (h *FriendsHandler) DeclineRequest(c *pulpgin.Context) {
-	accountID := uuid.MustParse(c.GetString("account_id"))
+	accountID, err := uuid.Parse(c.GetString("account_id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, middleware.ErrorResponse{Error: "invalid_token", Message: "Malformed account_id in token"})
+		return
+	}
 
 	var req HandleRequestInput
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -183,7 +195,11 @@ func (h *FriendsHandler) DeclineRequest(c *pulpgin.Context) {
 }
 
 func (h *FriendsHandler) RemoveFriend(c *pulpgin.Context) {
-	accountID := uuid.MustParse(c.GetString("account_id"))
+	accountID, err := uuid.Parse(c.GetString("account_id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, middleware.ErrorResponse{Error: "invalid_token", Message: "Malformed account_id in token"})
+		return
+	}
 	friendID, err := uuid.Parse(c.Param("friendId"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, middleware.ErrorResponse{
@@ -218,11 +234,15 @@ func (h *FriendsHandler) RemoveFriend(c *pulpgin.Context) {
 }
 
 func (h *FriendsHandler) ListFriends(c *pulpgin.Context) {
-	accountID := uuid.MustParse(c.GetString("account_id"))
+	accountID, err := uuid.Parse(c.GetString("account_id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, middleware.ErrorResponse{Error: "invalid_token", Message: "Malformed account_id in token"})
+		return
+	}
 	ctx := c.Ctx()
 
 	var friendships []Friendship
-	err := h.db.NewSelect().
+	err = h.db.NewSelect().
 		Model(&friendships).
 		Where("(requester_id = ? OR addressee_id = ?) AND status = ?",
 			accountID, accountID, StatusAccepted).
@@ -248,7 +268,11 @@ func (h *FriendsHandler) ListFriends(c *pulpgin.Context) {
 }
 
 func (h *FriendsHandler) ListRequests(c *pulpgin.Context) {
-	accountID := uuid.MustParse(c.GetString("account_id"))
+	accountID, err := uuid.Parse(c.GetString("account_id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, middleware.ErrorResponse{Error: "invalid_token", Message: "Malformed account_id in token"})
+		return
+	}
 	ctx := c.Ctx()
 
 	var incomingRows []Friendship

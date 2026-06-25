@@ -26,7 +26,11 @@ func NewBlocksHandler(db *bun.DB, friends FriendshipRemover) *BlocksHandler {
 }
 
 func (h *BlocksHandler) BlockUser(c *pulpgin.Context) {
-	blockerID := uuid.MustParse(c.GetString("account_id"))
+	blockerID, err := uuid.Parse(c.GetString("account_id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, middleware.ErrorResponse{Error: "invalid_token", Message: "Malformed account_id in token"})
+		return
+	}
 
 	var req BlockInput
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -81,7 +85,11 @@ func (h *BlocksHandler) BlockUser(c *pulpgin.Context) {
 }
 
 func (h *BlocksHandler) UnblockUser(c *pulpgin.Context) {
-	blockerID := uuid.MustParse(c.GetString("account_id"))
+	blockerID, err := uuid.Parse(c.GetString("account_id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, middleware.ErrorResponse{Error: "invalid_token", Message: "Malformed account_id in token"})
+		return
+	}
 	blockedID, err := uuid.Parse(c.Param("accountId"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, middleware.ErrorResponse{
@@ -115,11 +123,15 @@ func (h *BlocksHandler) UnblockUser(c *pulpgin.Context) {
 }
 
 func (h *BlocksHandler) ListBlocked(c *pulpgin.Context) {
-	blockerID := uuid.MustParse(c.GetString("account_id"))
+	blockerID, err := uuid.Parse(c.GetString("account_id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, middleware.ErrorResponse{Error: "invalid_token", Message: "Malformed account_id in token"})
+		return
+	}
 	ctx := c.Ctx()
 
 	var blockRows []Block
-	err := h.db.NewSelect().
+	err = h.db.NewSelect().
 		Model(&blockRows).
 		Where("blocker_id = ?", blockerID).
 		Scan(ctx)
