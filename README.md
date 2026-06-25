@@ -60,23 +60,50 @@ WebSocket messages pushed to connected clients:
 
 ## Config
 
-| Env Var          | Default              | Description                                   |
+### Native (`cmd/server`)
+
+| Env Var              | Default              | Description                                                              |
+| -------------------- | -------------------- | ------------------------------------------------------------------------ |
+| `JWT_SECRET`         | _required_           | Shared JWT signing key (must match BananAuth)                            |
+| `SERVICE_SECRET`     | `dev-service-secret` | Service-to-service auth token for `/internal` routes                     |
+| `DATABASE_URL`       | `sqlite://bunch.db`  | SQLite database path                                                     |
+| `HOST`               | `0.0.0.0`            | Server bind address                                                      |
+| `PORT`               | `8002`               | HTTP port                                                                |
+| `WS_ALLOWED_ORIGINS` | _(none)_             | Comma-separated origin allowlist for WS upgrades. Empty = deny all. `*` = allow all (dev only). |
+
+### Pulp cell (`pulp-cell`)
+
+Configuration is provided via the `[config]` block in `pulp.cell.toml`:
+
+| Key              | Default              | Description                                   |
 | ---------------- | -------------------- | --------------------------------------------- |
-| `JWT_SECRET`     | _required_           | Shared JWT signing key (must match BananAuth) |
-| `SERVICE_SECRET` | `dev-service-secret` | Service-to-service auth token                 |
-| `DATABASE_URL`   | `sqlite://bunch.db`  | SQLite database path                          |
-| `HOST`           | `0.0.0.0`            | Server bind address                           |
-| `PORT`           | `8002`               | HTTP port                                     |
+| `jwt_secret`     | _required_           | Shared JWT signing key                        |
+| `service_secret` | `dev-service-secret` | Service-to-service auth token (also accepts legacy `service_token`) |
+
+The cell has no `WS_ALLOWED_ORIGINS` equivalent — origin checking is handled at the Pulp host layer.
 
 ## Run
 
+### Native
+
 ```bash
-JWT_SECRET=your-secret go run ./cmd/server
+JWT_SECRET=your-secret WS_ALLOWED_ORIGINS=https://yourapp.com go run ./cmd/server
+```
+
+### Pulp cell
+
+Build the cell, then launch with the deployment host:
+
+```bash
+cd pulp-cell
+GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o bunch.wasm .
+cd ../pulp-deployment
+go run . --cell ../pulp-cell/bunch.wasm
 ```
 
 ## Docker
 
 ```bash
 docker pull ghcr.io/bananalabs-oss/bunch:v0.2.0
-docker run -p 8002:8002 -e JWT_SECRET=your-secret bunch
+docker run -p 8002:8002 -e JWT_SECRET=your-secret -e WS_ALLOWED_ORIGINS=https://yourapp.com bunch
 ```
