@@ -1,0 +1,26 @@
+name = "lua-orchestrator"
+version = "1.0.0"
+wasm = "lua-orchestrator.wasm"
+wasm_sha256 = "d287d2d93e09b02830ddf53f42e398b9c5ec49558e338b18e1b4c18d298c8006"
+
+provides = [
+  "orchestrator.dispatch",
+  "orchestrator.saga.execute.v1",
+]
+consumes = [
+  "social.v1.friend.request",
+  "social.v1.friend.accept",
+  "social.v1.friend.decline",
+  "social.v1.friend.remove",
+  "social.v1.friend.list",
+  "social.v1.request.list",
+  "social.v1.friend.ids",
+  "social.v1.block",
+  "social.v1.unblock",
+  "social.v1.block.list",
+]
+depends_on = ["social-graph"]
+capabilities = []
+
+[config]
+timeout_ms = 10000

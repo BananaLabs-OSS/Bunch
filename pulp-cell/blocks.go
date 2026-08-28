@@ -1,152 +1,76 @@
 package main
 
 import (
-	"context"
-	"net/http"
-	"time"
-
 	pulpgin "github.com/BananaLabs-OSS/Fiber/pulp/gin"
 	"github.com/BananaLabs-OSS/Fiber/pulp/gin/middleware"
+	"github.com/SirNiklas9/pulp-engines/social-graph-sqlite-cell/socialowner"
 	"github.com/google/uuid"
-	"github.com/uptrace/bun"
+	"time"
 )
 
-// FriendshipRemover is implemented by FriendsHandler.
-type FriendshipRemover interface {
-	RemoveFriendship(ctx context.Context, accountA, accountB uuid.UUID) error
-}
+type BlocksHandler struct{ friends *FriendsHandler }
 
-type BlocksHandler struct {
-	db      *bun.DB
-	friends FriendshipRemover
+func NewBlocksHandler(friends *FriendsHandler) *BlocksHandler {
+	return &BlocksHandler{friends: friends}
 }
-
-func NewBlocksHandler(db *bun.DB, friends FriendshipRemover) *BlocksHandler {
-	return &BlocksHandler{db: db, friends: friends}
-}
-
 func (h *BlocksHandler) BlockUser(c *pulpgin.Context) {
-	blockerID, err := uuid.Parse(c.GetString("account_id"))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, middleware.ErrorResponse{Error: "invalid_token", Message: "Malformed account_id in token"})
+	a, ok := actor(c)
+	if !ok {
 		return
 	}
-
-	var req BlockInput
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, middleware.ErrorResponse{
-			Error:   "invalid_request",
-			Message: "account_id is required",
-		})
+	var input BlockInput
+	if c.ShouldBindJSON(&input) != nil {
+		c.JSON(400, middleware.ErrorResponse{Error: "invalid_request", Message: "account_id is required"})
 		return
 	}
-
-	if blockerID == req.AccountID {
-		c.JSON(http.StatusBadRequest, middleware.ErrorResponse{
-			Error:   "self_block",
-			Message: "Cannot block yourself",
-		})
+	var result socialowner.Result[socialowner.Ack]
+	f := h.friends.call("bunch.block.v1", socialowner.BlockCommand{RequestID: commandID(c, "block"), BlockID: uuid.New(), ActorID: a, TargetID: input.AccountID, NowUnixMS: time.Now().UTC().UnixMilli()}, &result)
+	if f != nil {
+		socialFailure(c, f)
 		return
 	}
-
-	ctx := c.Ctx()
-
-	exists, err := h.db.NewSelect().
-		Model((*Block)(nil)).
-		Where("blocker_id = ? AND blocked_id = ?", blockerID, req.AccountID).
-		Exists(ctx)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, middleware.ErrorResponse{Error: "database_error"})
+	if result.Error != nil {
+		socialFailure(c, result.Error)
 		return
 	}
-	if exists {
-		c.JSON(http.StatusConflict, middleware.ErrorResponse{
-			Error:   "already_blocked",
-			Message: "User already blocked",
-		})
-		return
-	}
-
-	block := Block{
-		ID:        uuid.New(),
-		BlockerID: blockerID,
-		BlockedID: req.AccountID,
-		CreatedAt: time.Now().UTC(),
-	}
-
-	if _, err := h.db.NewInsert().Model(&block).Exec(ctx); err != nil {
-		c.JSON(http.StatusInternalServerError, middleware.ErrorResponse{Error: "creation_failed"})
-		return
-	}
-
-	_ = h.friends.RemoveFriendship(ctx, blockerID, req.AccountID)
-
-	c.JSON(http.StatusCreated, pulpgin.H{"status": "blocked"})
+	c.JSON(201, result.Value)
 }
-
 func (h *BlocksHandler) UnblockUser(c *pulpgin.Context) {
-	blockerID, err := uuid.Parse(c.GetString("account_id"))
+	a, ok := actor(c)
+	if !ok {
+		return
+	}
+	target, err := uuid.Parse(c.Param("accountId"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, middleware.ErrorResponse{Error: "invalid_token", Message: "Malformed account_id in token"})
+		c.JSON(400, middleware.ErrorResponse{Error: "invalid_id", Message: "Invalid account ID"})
 		return
 	}
-	blockedID, err := uuid.Parse(c.Param("accountId"))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, middleware.ErrorResponse{
-			Error:   "invalid_id",
-			Message: "Invalid account ID",
-		})
+	var result socialowner.Result[socialowner.Ack]
+	f := h.friends.call("bunch.unblock.v1", socialowner.FriendPairCommand{RequestID: commandID(c, "unblock"), ActorID: a, FriendID: target}, &result)
+	if f != nil {
+		socialFailure(c, f)
 		return
 	}
-
-	ctx := c.Ctx()
-
-	result, err := h.db.NewDelete().
-		Model((*Block)(nil)).
-		Where("blocker_id = ? AND blocked_id = ?", blockerID, blockedID).
-		Exec(ctx)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, middleware.ErrorResponse{Error: "database_error"})
+	if result.Error != nil {
+		socialFailure(c, result.Error)
 		return
 	}
-
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
-		c.JSON(http.StatusNotFound, middleware.ErrorResponse{
-			Error:   "not_found",
-			Message: "Block not found",
-		})
-		return
-	}
-
-	c.JSON(http.StatusOK, pulpgin.H{"status": "unblocked"})
+	c.JSON(200, result.Value)
 }
-
 func (h *BlocksHandler) ListBlocked(c *pulpgin.Context) {
-	blockerID, err := uuid.Parse(c.GetString("account_id"))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, middleware.ErrorResponse{Error: "invalid_token", Message: "Malformed account_id in token"})
+	a, ok := actor(c)
+	if !ok {
 		return
 	}
-	ctx := c.Ctx()
-
-	var blockRows []Block
-	err = h.db.NewSelect().
-		Model(&blockRows).
-		Where("blocker_id = ?", blockerID).
-		Scan(ctx)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, middleware.ErrorResponse{Error: "database_error"})
+	var result socialowner.Result[socialowner.Blocks]
+	f := h.friends.call("bunch.block.list.v1", socialowner.ActorRequest{ActorID: a}, &result)
+	if f != nil {
+		socialFailure(c, f)
 		return
 	}
-
-	blocked := make([]BlockedUser, 0, len(blockRows))
-	for _, b := range blockRows {
-		blocked = append(blocked, BlockedUser{
-			AccountID: b.BlockedID,
-			Since:     b.CreatedAt,
-		})
+	if result.Error != nil {
+		socialFailure(c, result.Error)
+		return
 	}
-
-	c.JSON(http.StatusOK, pulpgin.H{"blocks": blocked})
+	c.JSON(200, result.Value)
 }

@@ -8,29 +8,21 @@
 //
 // Build:
 //
-//	GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o bunch.wasm .
+//	GOOS=wasip1 GOARCH=wasm go build -trimpath -buildmode=c-shared -o social.wasm .
 package main
 
 import (
-	"context"
-	dsql "database/sql"
-	"encoding/json"
 	"fmt"
 	"net/http"
 
 	"github.com/BananaLabs-OSS/Fiber/pulp"
+	"github.com/BananaLabs-OSS/Fiber/pulp/cellconfig"
 	pulpgin "github.com/BananaLabs-OSS/Fiber/pulp/gin"
 	"github.com/BananaLabs-OSS/Fiber/pulp/gin/middleware"
-	_ "github.com/BananaLabs-OSS/Fiber/pulp/sql"
-	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/sqlitedialect"
+	"github.com/BananaLabs-OSS/Fiber/pulp/workflow"
 )
 
 func main() {}
-
-var (
-	db *bun.DB
-)
 
 func init() {
 	pulp.OnInit(bootstrap)
@@ -42,21 +34,8 @@ func bootstrap(configBytes []byte) error {
 		return fmt.Errorf("parse config: %w", err)
 	}
 
-	raw, err := dsql.Open("pulp", "")
-	if err != nil {
-		return fmt.Errorf("open pulp sql driver: %w", err)
-	}
-	// Match host single-writer pool; prevents nested-BEGIN races.
-	raw.SetMaxOpenConns(1)
-	raw.SetMaxIdleConns(1)
-	db = bun.NewDB(raw, sqlitedialect.New())
-
-	if err := migrate(context.Background()); err != nil {
-		return fmt.Errorf("migrate: %w", err)
-	}
-
-	friends := NewFriendsHandler(db)
-	blocks := NewBlocksHandler(db, friends)
+	friends := NewFriendsHandler(workflow.NewClient("lua-orchestrator"))
+	blocks := NewBlocksHandler(friends)
 	hub := NewHub(friends)
 	presence := NewPresenceHandler(hub, []byte(cfg.JWTSecret))
 
@@ -104,39 +83,8 @@ func bootstrap(configBytes []byte) error {
 	return nil
 }
 
-func migrate(ctx context.Context) error {
-	stmts := []string{
-		`CREATE TABLE IF NOT EXISTS friendships (
-			id TEXT PRIMARY KEY,
-			requester_id TEXT NOT NULL,
-			addressee_id TEXT NOT NULL,
-			status TEXT NOT NULL,
-			created_at TIMESTAMP NOT NULL,
-			updated_at TIMESTAMP NOT NULL
-		)`,
-		`CREATE TABLE IF NOT EXISTS blocks (
-			id TEXT PRIMARY KEY,
-			blocker_id TEXT NOT NULL,
-			blocked_id TEXT NOT NULL,
-			created_at TIMESTAMP NOT NULL
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_friendships_requester ON friendships (requester_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_friendships_addressee ON friendships (addressee_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_friendships_status ON friendships (status)`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS idx_friendships_pair ON friendships (requester_id, addressee_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_blocks_blocker ON blocks (blocker_id)`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS idx_blocks_pair ON blocks (blocker_id, blocked_id)`,
-	}
-	for _, s := range stmts {
-		if _, err := db.ExecContext(ctx, s); err != nil {
-			return fmt.Errorf("migrate exec: %w", err)
-		}
-	}
-	return nil
-}
-
 type config struct {
-	JWTSecret    string `json:"jwt_secret"`
+	JWTSecret string `json:"jwt_secret"`
 	// ServiceSecret is the /internal-route auth token. Aliased to
 	// `service_token` in manifests for backwards compatibility; the
 	// canonical key is `service_secret` so the config name matches the
@@ -157,15 +105,7 @@ func parseConfig(data []byte) (config, error) {
 		// as the native binary.
 		return cfg, fmt.Errorf("missing [config] — manifest must set jwt_secret")
 	}
-	var raw map[string]any
-	if err := decodeMsgpack(data, &raw); err != nil {
-		return cfg, err
-	}
-	jbytes, err := json.Marshal(raw)
-	if err != nil {
-		return cfg, fmt.Errorf("re-marshal config: %w", err)
-	}
-	if err := json.Unmarshal(jbytes, &cfg); err != nil {
+	if err := cellconfig.Decode(data, &cfg); err != nil {
 		return cfg, fmt.Errorf("decode config: %w", err)
 	}
 	if cfg.JWTSecret == "" {

@@ -1,0 +1,14 @@
+schema_version = 1
+name = "bunch"
+version = "1.0.0"
+require_wasm_sha256 = true
+cells = [
+  "../pulp-cell/social.cell.toml",
+  "../../pulp-engines/social-graph-sqlite-cell/pulp.cell.toml",
+  "lua-orchestrator.cell.toml",
+]
+
+[orchestrator]
+manifest = "lua-orchestrator.cell.toml"
+script = "bunch.lua"
+sha256 = "f2a07a0662abc5565c848344d62d07eace01e3e45662874e71d5c105e80644c4"

@@ -1,0 +1,17 @@
+name = "bunch-api"
+version = "1.0.0"
+wasm = "social.wasm"
+wasm_sha256 = "d28f52354c102753446d4810022fef057b0edb5f0e8f1cbff2c5019f7eb7a855"
+
+provides = []
+consumes = ["orchestrator.dispatch"]
+depends_on = ["lua-orchestrator"]
+
+capabilities = [
+    "transport.http.inbound",
+    "transport.ws.inbound",
+]
+
+[config]
+jwt_secret = "dev-jwt-secret-change-me"
+service_secret = "dev-service-secret"

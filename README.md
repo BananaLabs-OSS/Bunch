@@ -96,9 +96,9 @@ Build the cell, then launch with the deployment host:
 
 ```bash
 cd pulp-cell
-GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o bunch.wasm .
+GOOS=wasip1 GOARCH=wasm go build -trimpath -buildmode=c-shared -o social.wasm .
 cd ../pulp-deployment
-go run . --cell ../pulp-cell/bunch.wasm
+go run . --app ../application/pulp.app.toml
 ```
 
 ## Docker

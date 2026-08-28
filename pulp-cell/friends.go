@@ -2,352 +2,193 @@ package main
 
 import (
 	"context"
-	"database/sql"
+	"fmt"
 	"net/http"
 	"time"
 
 	pulpgin "github.com/BananaLabs-OSS/Fiber/pulp/gin"
 	"github.com/BananaLabs-OSS/Fiber/pulp/gin/middleware"
+	"github.com/BananaLabs-OSS/Fiber/pulp/workflow"
+	"github.com/SirNiklas9/pulp-engines/social-graph-sqlite-cell/socialowner"
 	"github.com/google/uuid"
-	"github.com/uptrace/bun"
+	"github.com/vmihailenco/msgpack/v5"
 )
 
-type FriendsHandler struct {
-	db *bun.DB
+type FriendsHandler struct{ client *workflow.Client }
+
+func NewFriendsHandler(client *workflow.Client) *FriendsHandler {
+	return &FriendsHandler{client: client}
 }
 
-func NewFriendsHandler(db *bun.DB) *FriendsHandler {
-	return &FriendsHandler{db: db}
+type socialReply struct {
+	ResponseMsgpack []byte `msgpack:"response_msgpack"`
+}
+
+func (h *FriendsHandler) call(event string, request any, output any) *socialowner.Error {
+	wire, err := msgpack.Marshal(request)
+	if err != nil {
+		return &socialowner.Error{Code: "unavailable", Message: err.Error()}
+	}
+	result, err := h.client.Dispatch(workflow.DispatchRequest{Event: event, Payload: map[string]any{"request_msgpack": wire}})
+	if err != nil {
+		return &socialowner.Error{Code: "unavailable", Message: err.Error()}
+	}
+	reply, err := workflow.DecodeValue[socialReply](result)
+	if err != nil {
+		return &socialowner.Error{Code: "unavailable", Message: err.Error()}
+	}
+	if err := msgpack.Unmarshal(reply.ResponseMsgpack, output); err != nil {
+		return &socialowner.Error{Code: "unavailable", Message: err.Error()}
+	}
+	return nil
+}
+
+func actor(c *pulpgin.Context) (uuid.UUID, bool) {
+	id, err := uuid.Parse(c.GetString("account_id"))
+	if err != nil {
+		c.JSON(400, middleware.ErrorResponse{Error: "invalid_token", Message: "Malformed account_id in token"})
+		return uuid.Nil, false
+	}
+	return id, true
+}
+
+func commandID(c *pulpgin.Context, operation string) string {
+	return fmt.Sprintf("%s:http-%d", operation, c.Request().ID)
+}
+
+func socialFailure(c *pulpgin.Context, failure *socialowner.Error) {
+	status := http.StatusConflict
+	if failure.Code == "invalid_request" || failure.Code == "self_friend" || failure.Code == "self_block" {
+		status = 400
+	}
+	if failure.Code == "blocked" {
+		status = 403
+	}
+	if failure.Code == "not_found" || failure.Code == "not_friends" {
+		status = 404
+	}
+	if failure.Code == "unavailable" {
+		status = 500
+	}
+	c.JSON(status, middleware.ErrorResponse{Error: failure.Code, Message: failure.Message})
 }
 
 func (h *FriendsHandler) SendRequest(c *pulpgin.Context) {
-	accountID, err := uuid.Parse(c.GetString("account_id"))
+	a, ok := actor(c)
+	if !ok {
+		return
+	}
+	var input SendRequestInput
+	if c.ShouldBindJSON(&input) != nil {
+		c.JSON(400, middleware.ErrorResponse{Error: "invalid_request", Message: "friend_id is required"})
+		return
+	}
+	var result socialowner.Result[socialowner.Friendship]
+	err := h.call("bunch.friend.request.v1", socialowner.FriendRequestCommand{RequestID: commandID(c, "friend-request"), FriendshipID: uuid.New(), ActorID: a, FriendID: input.FriendID, NowUnixMS: time.Now().UTC().UnixMilli()}, &result)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, middleware.ErrorResponse{Error: "invalid_token", Message: "Malformed account_id in token"})
+		socialFailure(c, err)
 		return
 	}
-
-	var req SendRequestInput
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, middleware.ErrorResponse{
-			Error:   "invalid_request",
-			Message: "friend_id is required",
-		})
+	if result.Error != nil {
+		socialFailure(c, result.Error)
 		return
 	}
-
-	if accountID == req.FriendID {
-		c.JSON(http.StatusBadRequest, middleware.ErrorResponse{
-			Error:   "self_friend",
-			Message: "Cannot send a friend request to yourself",
-		})
-		return
-	}
-
-	ctx := c.Ctx()
-
-	blocked, err := h.db.NewSelect().
-		Model((*Block)(nil)).
-		Where("(blocker_id = ? AND blocked_id = ?) OR (blocker_id = ? AND blocked_id = ?)",
-			accountID, req.FriendID, req.FriendID, accountID).
-		Exists(ctx)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, middleware.ErrorResponse{Error: "database_error"})
-		return
-	}
-	if blocked {
-		c.JSON(http.StatusForbidden, middleware.ErrorResponse{
-			Error:   "blocked",
-			Message: "Cannot send friend request",
-		})
-		return
-	}
-
-	var existing Friendship
-	err = h.db.NewSelect().
-		Model(&existing).
-		Where("(requester_id = ? AND addressee_id = ?) OR (requester_id = ? AND addressee_id = ?)",
-			accountID, req.FriendID, req.FriendID, accountID).
-		Scan(ctx)
-	if err == nil {
-		if existing.Status == StatusAccepted {
-			c.JSON(http.StatusConflict, middleware.ErrorResponse{
-				Error:   "already_friends",
-				Message: "Already friends with this user",
-			})
-		} else {
-			c.JSON(http.StatusConflict, middleware.ErrorResponse{
-				Error:   "request_exists",
-				Message: "A friend request already exists",
-			})
-		}
-		return
-	}
-	if err != sql.ErrNoRows {
-		c.JSON(http.StatusInternalServerError, middleware.ErrorResponse{Error: "database_error"})
-		return
-	}
-
-	now := time.Now().UTC()
-	friendship := Friendship{
-		ID:          uuid.New(),
-		RequesterID: accountID,
-		AddresseeID: req.FriendID,
-		Status:      StatusPending,
-		CreatedAt:   now,
-		UpdatedAt:   now,
-	}
-
-	if _, err := h.db.NewInsert().Model(&friendship).Exec(ctx); err != nil {
-		c.JSON(http.StatusInternalServerError, middleware.ErrorResponse{
-			Error:   "creation_failed",
-			Message: "Failed to create friend request",
-		})
-		return
-	}
-
-	c.JSON(http.StatusCreated, friendship)
+	c.JSON(201, result.Value)
 }
 
 func (h *FriendsHandler) AcceptRequest(c *pulpgin.Context) {
-	accountID, err := uuid.Parse(c.GetString("account_id"))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, middleware.ErrorResponse{Error: "invalid_token", Message: "Malformed account_id in token"})
-		return
-	}
-
-	var req HandleRequestInput
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, middleware.ErrorResponse{
-			Error:   "invalid_request",
-			Message: "request_id is required",
-		})
-		return
-	}
-
-	ctx := c.Ctx()
-
-	var friendship Friendship
-	err = h.db.NewSelect().
-		Model(&friendship).
-		Where("id = ? AND addressee_id = ? AND status = ?", req.RequestID, accountID, StatusPending).
-		Scan(ctx)
-	if err == sql.ErrNoRows {
-		c.JSON(http.StatusNotFound, middleware.ErrorResponse{
-			Error:   "not_found",
-			Message: "Friend request not found or you are not the recipient",
-		})
-		return
-	}
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, middleware.ErrorResponse{Error: "database_error"})
-		return
-	}
-
-	friendship.Status = StatusAccepted
-	friendship.UpdatedAt = time.Now().UTC()
-
-	if _, err := h.db.NewUpdate().Model(&friendship).WherePK().Exec(ctx); err != nil {
-		c.JSON(http.StatusInternalServerError, middleware.ErrorResponse{Error: "update_failed"})
-		return
-	}
-
-	c.JSON(http.StatusOK, pulpgin.H{"status": "accepted"})
+	h.decision(c, "bunch.friend.accept.v1", "accept")
 }
-
 func (h *FriendsHandler) DeclineRequest(c *pulpgin.Context) {
-	accountID, err := uuid.Parse(c.GetString("account_id"))
+	h.decision(c, "bunch.friend.decline.v1", "decline")
+}
+func (h *FriendsHandler) decision(c *pulpgin.Context, event, operation string) {
+	a, ok := actor(c)
+	if !ok {
+		return
+	}
+	var input HandleRequestInput
+	if c.ShouldBindJSON(&input) != nil {
+		c.JSON(400, middleware.ErrorResponse{Error: "invalid_request", Message: "request_id is required"})
+		return
+	}
+	var result socialowner.Result[socialowner.Ack]
+	err := h.call(event, socialowner.RequestDecisionCommand{RequestID: commandID(c, operation), ActorID: a, FriendshipID: input.RequestID, NowUnixMS: time.Now().UTC().UnixMilli()}, &result)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, middleware.ErrorResponse{Error: "invalid_token", Message: "Malformed account_id in token"})
+		socialFailure(c, err)
 		return
 	}
-
-	var req HandleRequestInput
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, middleware.ErrorResponse{
-			Error:   "invalid_request",
-			Message: "request_id is required",
-		})
+	if result.Error != nil {
+		socialFailure(c, result.Error)
 		return
 	}
-
-	ctx := c.Ctx()
-
-	result, err := h.db.NewDelete().
-		Model((*Friendship)(nil)).
-		Where("id = ? AND addressee_id = ? AND status = ?", req.RequestID, accountID, StatusPending).
-		Exec(ctx)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, middleware.ErrorResponse{Error: "database_error"})
-		return
-	}
-
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
-		c.JSON(http.StatusNotFound, middleware.ErrorResponse{
-			Error:   "not_found",
-			Message: "Friend request not found or you are not the recipient",
-		})
-		return
-	}
-
-	c.JSON(http.StatusOK, pulpgin.H{"status": "declined"})
+	c.JSON(200, result.Value)
 }
 
 func (h *FriendsHandler) RemoveFriend(c *pulpgin.Context) {
-	accountID, err := uuid.Parse(c.GetString("account_id"))
+	a, ok := actor(c)
+	if !ok {
+		return
+	}
+	friend, err := uuid.Parse(c.Param("friendId"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, middleware.ErrorResponse{Error: "invalid_token", Message: "Malformed account_id in token"})
+		c.JSON(400, middleware.ErrorResponse{Error: "invalid_id", Message: "Invalid friend ID"})
 		return
 	}
-	friendID, err := uuid.Parse(c.Param("friendId"))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, middleware.ErrorResponse{
-			Error:   "invalid_id",
-			Message: "Invalid friend ID",
-		})
+	var result socialowner.Result[socialowner.Ack]
+	failure := h.call("bunch.friend.remove.v1", socialowner.FriendPairCommand{RequestID: commandID(c, "remove"), ActorID: a, FriendID: friend}, &result)
+	if failure != nil {
+		socialFailure(c, failure)
 		return
 	}
-
-	ctx := c.Ctx()
-
-	result, err := h.db.NewDelete().
-		Model((*Friendship)(nil)).
-		Where("((requester_id = ? AND addressee_id = ?) OR (requester_id = ? AND addressee_id = ?)) AND status = ?",
-			accountID, friendID, friendID, accountID, StatusAccepted).
-		Exec(ctx)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, middleware.ErrorResponse{Error: "database_error"})
+	if result.Error != nil {
+		socialFailure(c, result.Error)
 		return
 	}
-
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
-		c.JSON(http.StatusNotFound, middleware.ErrorResponse{
-			Error:   "not_friends",
-			Message: "Not friends with this user",
-		})
-		return
-	}
-
-	c.JSON(http.StatusOK, pulpgin.H{"status": "removed"})
+	c.JSON(200, result.Value)
 }
 
 func (h *FriendsHandler) ListFriends(c *pulpgin.Context) {
-	accountID, err := uuid.Parse(c.GetString("account_id"))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, middleware.ErrorResponse{Error: "invalid_token", Message: "Malformed account_id in token"})
+	a, ok := actor(c)
+	if !ok {
 		return
 	}
-	ctx := c.Ctx()
-
-	var friendships []Friendship
-	err = h.db.NewSelect().
-		Model(&friendships).
-		Where("(requester_id = ? OR addressee_id = ?) AND status = ?",
-			accountID, accountID, StatusAccepted).
-		Scan(ctx)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, middleware.ErrorResponse{Error: "database_error"})
+	var result socialowner.Result[socialowner.Friends]
+	failure := h.call("bunch.friend.list.v1", socialowner.ActorRequest{ActorID: a}, &result)
+	if failure != nil {
+		socialFailure(c, failure)
 		return
 	}
-
-	friends := make([]Friend, 0, len(friendships))
-	for _, f := range friendships {
-		friendAccountID := f.AddresseeID
-		if f.AddresseeID == accountID {
-			friendAccountID = f.RequesterID
-		}
-		friends = append(friends, Friend{
-			AccountID: friendAccountID,
-			Since:     f.UpdatedAt,
-		})
+	if result.Error != nil {
+		socialFailure(c, result.Error)
+		return
 	}
-
-	c.JSON(http.StatusOK, pulpgin.H{"friends": friends})
+	c.JSON(200, result.Value)
 }
-
 func (h *FriendsHandler) ListRequests(c *pulpgin.Context) {
-	accountID, err := uuid.Parse(c.GetString("account_id"))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, middleware.ErrorResponse{Error: "invalid_token", Message: "Malformed account_id in token"})
+	a, ok := actor(c)
+	if !ok {
 		return
 	}
-	ctx := c.Ctx()
-
-	var incomingRows []Friendship
-	if err := h.db.NewSelect().
-		Model(&incomingRows).
-		Where("addressee_id = ? AND status = ?", accountID, StatusPending).
-		Scan(ctx); err != nil {
-		c.JSON(http.StatusInternalServerError, middleware.ErrorResponse{Error: "database_error"})
+	var result socialowner.Result[socialowner.Requests]
+	failure := h.call("bunch.request.list.v1", socialowner.ActorRequest{ActorID: a}, &result)
+	if failure != nil {
+		socialFailure(c, failure)
 		return
 	}
-
-	incoming := make([]FriendRequest, 0, len(incomingRows))
-	for _, f := range incomingRows {
-		incoming = append(incoming, FriendRequest{
-			ID:            f.ID,
-			FromAccountID: f.RequesterID,
-			ToAccountID:   f.AddresseeID,
-			CreatedAt:     f.CreatedAt,
-		})
-	}
-
-	var outgoingRows []Friendship
-	if err := h.db.NewSelect().
-		Model(&outgoingRows).
-		Where("requester_id = ? AND status = ?", accountID, StatusPending).
-		Scan(ctx); err != nil {
-		c.JSON(http.StatusInternalServerError, middleware.ErrorResponse{Error: "database_error"})
+	if result.Error != nil {
+		socialFailure(c, result.Error)
 		return
 	}
-
-	outgoing := make([]FriendRequest, 0, len(outgoingRows))
-	for _, f := range outgoingRows {
-		outgoing = append(outgoing, FriendRequest{
-			ID:            f.ID,
-			FromAccountID: f.RequesterID,
-			ToAccountID:   f.AddresseeID,
-			CreatedAt:     f.CreatedAt,
-		})
-	}
-
-	c.JSON(http.StatusOK, pulpgin.H{
-		"incoming": incoming,
-		"outgoing": outgoing,
-	})
+	c.JSON(200, result.Value)
 }
-
-// RemoveFriendship is called internally by the blocks handler.
-func (h *FriendsHandler) RemoveFriendship(ctx context.Context, accountA, accountB uuid.UUID) error {
-	_, err := h.db.NewDelete().
-		Model((*Friendship)(nil)).
-		Where("(requester_id = ? AND addressee_id = ?) OR (requester_id = ? AND addressee_id = ?)",
-			accountA, accountB, accountB, accountA).
-		Exec(ctx)
-	return err
-}
-
-// ListFriendIDs is used by the presence hub to know who to notify.
-func (h *FriendsHandler) ListFriendIDs(ctx context.Context, accountID uuid.UUID) ([]uuid.UUID, error) {
-	var friendships []Friendship
-	err := h.db.NewSelect().
-		Model(&friendships).
-		Where("(requester_id = ? OR addressee_id = ?) AND status = ?",
-			accountID, accountID, StatusAccepted).
-		Scan(ctx)
-	if err != nil {
-		return nil, err
+func (h *FriendsHandler) ListFriendIDs(_ context.Context, accountID uuid.UUID) ([]uuid.UUID, error) {
+	var result socialowner.Result[socialowner.FriendIDs]
+	if failure := h.call("bunch.friend.ids.v1", socialowner.ActorRequest{ActorID: accountID}, &result); failure != nil {
+		return nil, fmt.Errorf("%s", failure.Message)
 	}
-
-	ids := make([]uuid.UUID, 0, len(friendships))
-	for _, f := range friendships {
-		if f.AddresseeID == accountID {
-			ids = append(ids, f.RequesterID)
-		} else {
-			ids = append(ids, f.AddresseeID)
-		}
+	if result.Error != nil {
+		return nil, fmt.Errorf("%s", result.Error.Message)
 	}
-	return ids, nil
+	return result.Value.AccountIDs, nil
 }

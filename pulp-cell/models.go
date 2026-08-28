@@ -1,55 +1,23 @@
 package main
 
 import (
-	"time"
+	"github.com/SirNiklas9/pulp-engines/social-graph-sqlite-cell/socialowner"
 
 	"github.com/google/uuid"
-	"github.com/uptrace/bun"
 )
 
-type FriendshipStatus string
+type FriendshipStatus = socialowner.FriendshipStatus
 
 const (
-	StatusPending  FriendshipStatus = "pending"
-	StatusAccepted FriendshipStatus = "accepted"
+	StatusPending  = socialowner.StatusPending
+	StatusAccepted = socialowner.StatusAccepted
 )
 
-type Friendship struct {
-	bun.BaseModel `bun:"table:friendships,alias:f"`
-
-	ID          uuid.UUID        `bun:"id,pk,type:uuid" json:"id"`
-	RequesterID uuid.UUID        `bun:"requester_id,notnull,type:uuid" json:"requester_id"`
-	AddresseeID uuid.UUID        `bun:"addressee_id,notnull,type:uuid" json:"addressee_id"`
-	Status      FriendshipStatus `bun:"status,notnull" json:"status"`
-	CreatedAt   time.Time        `bun:"created_at,nullzero,notnull" json:"created_at"`
-	UpdatedAt   time.Time        `bun:"updated_at,nullzero,notnull" json:"updated_at"`
-}
-
-type Block struct {
-	bun.BaseModel `bun:"table:blocks,alias:b"`
-
-	ID        uuid.UUID `bun:"id,pk,type:uuid" json:"id"`
-	BlockerID uuid.UUID `bun:"blocker_id,notnull,type:uuid" json:"blocker_id"`
-	BlockedID uuid.UUID `bun:"blocked_id,notnull,type:uuid" json:"blocked_id"`
-	CreatedAt time.Time `bun:"created_at,nullzero,notnull" json:"created_at"`
-}
-
-type Friend struct {
-	AccountID uuid.UUID `json:"account_id"`
-	Since     time.Time `json:"since"`
-}
-
-type FriendRequest struct {
-	ID            uuid.UUID `json:"id"`
-	FromAccountID uuid.UUID `json:"from_account_id"`
-	ToAccountID   uuid.UUID `json:"to_account_id"`
-	CreatedAt     time.Time `json:"created_at"`
-}
-
-type BlockedUser struct {
-	AccountID uuid.UUID `json:"account_id"`
-	Since     time.Time `json:"since"`
-}
+type Friendship = socialowner.Friendship
+type Block = socialowner.Block
+type Friend = socialowner.Friend
+type FriendRequest = socialowner.FriendRequest
+type BlockedUser = socialowner.BlockedUser
 
 type SendRequestInput struct {
 	FriendID uuid.UUID `json:"friend_id" binding:"required"`
